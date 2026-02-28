@@ -514,11 +514,31 @@ function setChecking(on) {
 }
 
 // ── Manual check ──────────────────────────────────────────────────
+let _checkPoller = null;
+
 async function triggerCheck() {
   try {
     const r = await fetch('/api/check', { method: 'POST' });
     if (r.status === 429) { showError('Already checking, please wait.'); return; }
+    if (!r.ok) { showError('Check request failed (' + r.status + ').'); return; }
     setChecking(true);
+
+    // Poll /api/status every 3 s until checking is done.
+    // This is a reliable fallback for environments where SSE is buffered/dropped.
+    if (_checkPoller) clearInterval(_checkPoller);
+    _checkPoller = setInterval(async () => {
+      try {
+        const sr = await fetch('/api/status');
+        if (!sr.ok) return;
+        const sd = await sr.json();
+        if (!sd.checking) {
+          clearInterval(_checkPoller);
+          _checkPoller = null;
+          applyStatus(sd);
+          setChecking(false);
+        }
+      } catch (_) { /* ignore transient errors */ }
+    }, 3000);
   } catch (e) { showError('Could not reach server.'); }
 }
 
@@ -564,8 +584,8 @@ function showError(msg) {
 // ── Boot ──────────────────────────────────────────────────────────
 loadStatus();
 connectSSE();
-// Fallback polling every 60s (in case SSE fails)
-setInterval(loadStatus, 60000);
+// Fallback polling every 15s (in case SSE fails)
+setInterval(loadStatus, 15000);
 </script>
 </body>
 </html>
