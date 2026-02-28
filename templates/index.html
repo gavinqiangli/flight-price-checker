@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>✈ Flight Price Monitor – PEK ↔ ARN</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ── Reset & Base ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #060c1a;
+  --bg2:         #0d1630;
+  --glass:       rgba(13, 22, 48, 0.75);
+  --border:      rgba(255,255,255,0.08);
+  --cyan:        #00d4ff;
+  --cyan-dim:    rgba(0,212,255,0.15);
+  --green:       #00e676;
+  --green-dim:   rgba(0,230,118,0.12);
+  --red:         #ff4757;
+  --red-dim:     rgba(255,71,87,0.12);
+  --yellow:      #ffd32a;
+  --text:        #e2e8f0;
+  --text-muted:  #64748b;
+  --radius:      16px;
+}
+
+html { font-size: 16px; }
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Animated background ───────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 10%, rgba(0,212,255,0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 80%, rgba(100,60,220,0.07) 0%, transparent 60%),
+    var(--bg);
+}
+
+/* ── Layout ────────────────────────────────────────────────────── */
+.container { max-width: 1100px; margin: 0 auto; padding: 0 20px 60px; }
+
+/* ── Header ────────────────────────────────────────────────────── */
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 28px 0 24px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap; gap: 16px;
+}
+.header-left { display: flex; align-items: center; gap: 16px; }
+.plane-icon { font-size: 2rem; }
+.header-title h1 {
+  font-size: 1.4rem; font-weight: 700; letter-spacing: -0.3px;
+  background: linear-gradient(135deg, #fff 0%, var(--cyan) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.header-title p { font-size: 0.82rem; color: var(--text-muted); margin-top: 2px; }
+.header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* ── Live badge ────────────────────────────────────────────────── */
+.badge-live {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 20px;
+  background: var(--green-dim); border: 1px solid rgba(0,230,118,0.3);
+  font-size: 0.78rem; font-weight: 600; color: var(--green);
+}
+.badge-live .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* ── Check Now button ──────────────────────────────────────────── */
+.btn-check {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 20px; border-radius: 20px; border: none; cursor: pointer;
+  background: linear-gradient(135deg, var(--cyan), #0099bb);
+  color: #000; font-weight: 700; font-size: 0.84rem;
+  transition: opacity 0.2s, transform 0.15s;
+}
+.btn-check:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+.btn-check:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-check .spin { animation: spin 1s linear infinite; display: none; }
+.btn-check.loading .spin { display: inline-block; }
+.btn-check.loading .icon { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Cards grid ────────────────────────────────────────────────── */
+.cards { display: grid; gap: 16px; margin-top: 28px; }
+.cards-top { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+.card {
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  backdrop-filter: blur(12px);
+  transition: border-color 0.3s, box-shadow 0.3s;
+  position: relative; overflow: hidden;
+}
+.card::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, transparent 60%);
+  pointer-events: none;
+}
+.card-label {
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px;
+}
+.card-value {
+  font-size: 2.4rem; font-weight: 800; line-height: 1;
+  letter-spacing: -1px; transition: color 0.4s;
+}
+.card-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; }
+
+/* Price card states */
+.card.deal  { border-color: rgba(0,230,118,0.4); box-shadow: 0 0 30px rgba(0,230,118,0.08); }
+.card.pricey{ border-color: rgba(255,71,87,0.35); }
+.price-deal  { color: var(--green) !important; }
+.price-pricey{ color: var(--red)   !important; }
+
+/* ── Deal banner ───────────────────────────────────────────────── */
+.deal-banner {
+  display: none;
+  align-items: center; justify-content: center; gap: 10px;
+  margin-top: 16px; padding: 14px 20px; border-radius: 12px;
+  background: var(--green-dim); border: 1px solid rgba(0,230,118,0.35);
+  font-weight: 700; font-size: 1rem; color: var(--green);
+  animation: glow 2s ease-in-out infinite alternate;
+}
+.deal-banner.show { display: flex; }
+@keyframes glow {
+  from { box-shadow: 0 0 8px rgba(0,230,118,0.1); }
+  to   { box-shadow: 0 0 24px rgba(0,230,118,0.3); }
+}
+
+/* ── Progress bar ──────────────────────────────────────────────── */
+.progress-wrap { margin-top: 16px; }
+.progress-labels {
+  display: flex; justify-content: space-between;
+  font-size: 0.75rem; color: var(--text-muted); margin-bottom: 6px;
+}
+.progress-track {
+  height: 8px; background: rgba(255,255,255,0.06);
+  border-radius: 8px; overflow: hidden;
+}
+.progress-fill {
+  height: 100%; border-radius: 8px;
+  background: linear-gradient(90deg, var(--green), var(--cyan));
+  transition: width 0.8s cubic-bezier(.22,1,.36,1), background 0.4s;
+  max-width: 100%;
+}
+.progress-fill.over { background: linear-gradient(90deg, var(--cyan), var(--red)); }
+
+/* ── Offers table ──────────────────────────────────────────────── */
+.offers-list { margin-top: 8px; }
+.offer-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 0.84rem;
+}
+.offer-row:last-child { border-bottom: none; }
+.offer-rank { color: var(--text-muted); width: 20px; flex-shrink: 0; }
+.offer-price { font-weight: 700; }
+.offer-price.deal-price { color: var(--green); }
+.offer-airlines { color: var(--text-muted); font-size: 0.78rem; }
+.offer-tag {
+  font-size: 0.68rem; padding: 2px 8px; border-radius: 10px;
+  background: var(--cyan-dim); color: var(--cyan); font-weight: 600;
+}
+
+/* ── Info row ──────────────────────────────────────────────────── */
+.info-row {
+  display: flex; flex-wrap: wrap; gap: 20px;
+  margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem; color: var(--text-muted);
+}
+.info-item strong { color: var(--text); margin-left: 4px; }
+
+/* ── Chart card ────────────────────────────────────────────────── */
+.chart-card { margin-top: 16px; }
+.chart-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 20px; flex-wrap: wrap; gap: 8px;
+}
+.chart-header h3 { font-size: 0.9rem; font-weight: 600; }
+.chart-empty {
+  text-align: center; padding: 40px; color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.chart-wrap { position: relative; height: 260px; }
+
+/* ── Last-updated strip ────────────────────────────────────────── */
+.status-strip {
+  display: flex; flex-wrap: wrap; gap: 20px; align-items: center;
+  margin-top: 16px; padding: 14px 20px; border-radius: 12px;
+  background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+  font-size: 0.8rem; color: var(--text-muted);
+}
+.status-strip strong { color: var(--text); }
+.checking-indicator { display: none; color: var(--cyan); }
+.checking-indicator.show { display: inline; }
+
+/* ── Error toast ───────────────────────────────────────────────── */
+#error-toast {
+  display: none; position: fixed; bottom: 28px; right: 28px;
+  background: #1a0a0a; border: 1px solid var(--red);
+  color: var(--red); padding: 14px 20px; border-radius: 10px;
+  font-size: 0.85rem; z-index: 999; max-width: 340px;
+}
+#error-toast.show { display: block; }
+
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .card-value { font-size: 1.9rem; }
+  header { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <div class="header-left">
+      <div class="plane-icon">✈</div>
+      <div class="header-title">
+        <h1>Flight Price Monitor</h1>
+        <p>
+          {{ origin }} ↔ {{ destination }} &nbsp;|&nbsp;
+          Depart {{ depart_date }} &nbsp;→&nbsp; Return {{ return_date }} &nbsp;|&nbsp;
+          Direct flights only
+        </p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="badge-live"><div class="dot"></div> LIVE</div>
+      <button class="btn-check" id="checkBtn" onclick="triggerCheck()">
+        <span class="icon">↻</span>
+        <span class="spin">⟳</span>
+        Check Now
+      </button>
+    </div>
+  </header>
+
+  <!-- Deal banner -->
+  <div class="deal-banner" id="dealBanner">
+    🎉 &nbsp; PRICE ALERT — Flight is below {{ price_limit }} SEK! Book now!
+  </div>
+
+  <!-- Top cards -->
+  <div class="cards cards-top" style="margin-top:24px;">
+
+    <!-- Current price -->
+    <div class="card" id="priceCard">
+      <div class="card-label">Cheapest Direct Price</div>
+      <div class="card-value" id="priceVal">—</div>
+      <div class="card-sub" id="priceAirlines">Loading...</div>
+      <div class="progress-wrap" id="progressWrap" style="display:none">
+        <div class="progress-labels">
+          <span>0</span>
+          <span id="progressPct">—</span>
+          <span>{{ price_limit }} SEK limit</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Threshold -->
+    <div class="card">
+      <div class="card-label">Alert Threshold</div>
+      <div class="card-value" style="color:var(--cyan)">{{ price_limit }}<span style="font-size:1.1rem;font-weight:500"> SEK</span></div>
+      <div class="card-sub">Desktop + Windows toast notification</div>
+    </div>
+
+    <!-- Gap card -->
+    <div class="card">
+      <div class="card-label">Gap to Target</div>
+      <div class="card-value" id="gapVal" style="color:var(--text-muted)">—</div>
+      <div class="card-sub" id="gapSub">Awaiting first check</div>
+    </div>
+
+  </div>
+
+  <!-- Offers list card -->
+  <div class="cards" style="margin-top:16px; grid-template-columns:1fr;">
+    <div class="card">
+      <div class="card-label">Top Direct Offers</div>
+      <div class="offers-list" id="offersList">
+        <div class="offer-row"><span style="color:var(--text-muted);font-size:0.85rem">No data yet — click "Check Now" or wait for the scheduler.</span></div>
+      </div>
+      <div class="info-row" id="infoRow">
+        <span class="info-item">Last checked: <strong id="lastChecked">—</strong></span>
+        <span class="item-item">Next check: <strong id="nextCheck">—</strong></span>
+        <span class="checking-indicator" id="checkingInd">⟳ Fetching prices...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="card chart-card">
+    <div class="chart-header">
+      <h3>Price History (SEK)</h3>
+      <span style="font-size:0.75rem;color:var(--text-muted)">Last 50 checks</span>
+    </div>
+    <div id="chartEmpty" class="chart-empty">No history yet. Prices will appear here after the first check.</div>
+    <div class="chart-wrap" id="chartWrap" style="display:none">
+      <canvas id="priceChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Status strip -->
+  <div class="status-strip">
+    <span>Route: <strong>{{ origin }} ↔ {{ destination }}</strong></span>
+    <span>Dates: <strong>{{ depart_date }} → {{ return_date }}</strong></span>
+    <span>Check interval: <strong>Every {{ check_hours }}h</strong></span>
+    <span>Currency: <strong>SEK</strong></span>
+  </div>
+
+</div><!-- /container -->
+
+<!-- Error toast -->
+<div id="error-toast"></div>
+
+<script>
+// ── Config (injected from Flask) ──────────────────────────────────
+const PRICE_LIMIT = {{ price_limit }};
+
+// ── Chart setup ───────────────────────────────────────────────────
+let chart = null;
+
+function initChart(labels, prices) {
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  const limitData = prices.map(() => PRICE_LIMIT);
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Price (SEK)',
+          data: prices,
+          borderColor: '#00d4ff',
+          backgroundColor: 'rgba(0,212,255,0.08)',
+          borderWidth: 2.5,
+          pointRadius: prices.length > 15 ? 2 : 4,
+          pointBackgroundColor: prices.map(p => p < PRICE_LIMIT ? '#00e676' : '#00d4ff'),
+          tension: 0.35,
+          fill: true,
+        },
+        {
+          label: `Threshold (${PRICE_LIMIT} SEK)`,
+          data: limitData,
+          borderColor: 'rgba(255,71,87,0.6)',
+          borderWidth: 1.5,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          fill: false,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#94a3b8', font: { size: 12 }, boxWidth: 18 }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(13,22,48,0.95)',
+          titleColor: '#e2e8f0',
+          bodyColor: '#94a3b8',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${Math.round(ctx.parsed.y).toLocaleString()} SEK`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#475569', font: { size: 11 }, maxTicksLimit: 10 },
+          grid:  { color: 'rgba(255,255,255,0.04)' },
+        },
+        y: {
+          ticks: {
+            color: '#475569', font: { size: 11 },
+            callback: v => v.toLocaleString() + ' SEK'
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+        }
+      }
+    }
+  });
+}
+
+function updateChart(history) {
+  const labels = history.map(h => h.timestamp.slice(5));   // "MM-DD HH:mm"
+  const prices = history.map(h => h.price_sek);
+
+  if (!prices.length) {
+    document.getElementById('chartEmpty').style.display = 'block';
+    document.getElementById('chartWrap').style.display  = 'none';
+    return;
+  }
+  document.getElementById('chartEmpty').style.display = 'none';
+  document.getElementById('chartWrap').style.display  = 'block';
+
+  if (!chart) {
+    initChart(labels, prices);
+  } else {
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = prices;
+    chart.data.datasets[0].pointBackgroundColor = prices.map(p => p < PRICE_LIMIT ? '#00e676' : '#00d4ff');
+    chart.data.datasets[1].data = prices.map(() => PRICE_LIMIT);
+    chart.update('none');
+  }
+}
+
+// ── Update UI with status data ────────────────────────────────────
+function applyStatus(data) {
+  const cur = data.current || {};
+  const price = cur.price_sek;
+
+  // Price card
+  const priceEl = document.getElementById('priceVal');
+  const priceCard = document.getElementById('priceCard');
+
+  if (cur.error) {
+    priceEl.textContent = 'Error';
+    priceEl.className = 'card-value';
+    document.getElementById('priceAirlines').textContent = cur.error;
+  } else if (price != null) {
+    priceEl.textContent = Math.round(price).toLocaleString() + ' SEK';
+    const isDeal = price < PRICE_LIMIT;
+    priceEl.className = 'card-value ' + (isDeal ? 'price-deal' : 'price-pricey');
+    priceCard.className = 'card ' + (isDeal ? 'deal' : 'pricey');
+    document.getElementById('priceAirlines').textContent =
+      'Airlines: ' + (cur.airlines || '—') + '  •  Non-stop';
+
+    // Progress bar
+    const pct = Math.min((price / PRICE_LIMIT) * 100, 200);
+    const fillPct = Math.min(pct, 100);
+    document.getElementById('progressWrap').style.display = 'block';
+    const fill = document.getElementById('progressFill');
+    fill.style.width = fillPct + '%';
+    fill.className   = 'progress-fill' + (pct > 100 ? ' over' : '');
+    document.getElementById('progressPct').textContent = Math.round(pct) + '%';
+
+    // Gap card
+    const gap   = price - PRICE_LIMIT;
+    const gapEl = document.getElementById('gapVal');
+    const gapSb = document.getElementById('gapSub');
+    if (isDeal) {
+      gapEl.textContent = Math.round(Math.abs(gap)).toLocaleString() + ' SEK';
+      gapEl.style.color = 'var(--green)';
+      gapSb.textContent = '🎉 Below target – BOOK NOW!';
+    } else {
+      gapEl.textContent = '+' + Math.round(gap).toLocaleString() + ' SEK';
+      gapEl.style.color = 'var(--red)';
+      gapSb.textContent = 'Still above the threshold';
+    }
+
+    // Deal banner
+    document.getElementById('dealBanner').classList.toggle('show', isDeal);
+
+    // Offers list
+    const offers = cur.all_offers || [];
+    const list = document.getElementById('offersList');
+    if (offers.length) {
+      list.innerHTML = offers.map((o, i) => `
+        <div class="offer-row">
+          <span class="offer-rank">#${i+1}</span>
+          <span class="offer-price ${o.price < PRICE_LIMIT ? 'deal-price' : ''}">
+            ${Math.round(o.price).toLocaleString()} SEK
+          </span>
+          <span class="offer-airlines">${(o.airlines||[]).join(', ')}</span>
+          ${i === 0 ? '<span class="offer-tag">Cheapest</span>' : ''}
+        </div>`).join('');
+    }
+  }
+
+  // Timestamps
+  document.getElementById('lastChecked').textContent = cur.timestamp || '—';
+  document.getElementById('nextCheck').textContent   = data.next_check_at
+    ? 'around ' + data.next_check_at : '—';
+
+  // Chart
+  if (data.history && data.history.length) updateChart(data.history);
+}
+
+// ── Checking state ────────────────────────────────────────────────
+function setChecking(on) {
+  const btn  = document.getElementById('checkBtn');
+  const ind  = document.getElementById('checkingInd');
+  btn.disabled = on;
+  btn.classList.toggle('loading', on);
+  ind.classList.toggle('show', on);
+}
+
+// ── Manual check ──────────────────────────────────────────────────
+async function triggerCheck() {
+  try {
+    const r = await fetch('/api/check', { method: 'POST' });
+    if (r.status === 429) { showError('Already checking, please wait.'); return; }
+    setChecking(true);
+  } catch (e) { showError('Could not reach server.'); }
+}
+
+// ── Initial load ──────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    applyStatus(d);
+    setChecking(d.checking);
+  } catch (e) { showError('Cannot reach server – is app.py running?'); }
+}
+
+// ── Server-Sent Events ────────────────────────────────────────────
+function connectSSE() {
+  const es = new EventSource('/stream');
+
+  es.addEventListener('checking', e => {
+    const d = JSON.parse(e.data);
+    setChecking(d.checking);
+    if (!d.checking) loadStatus();     // refresh full data after check completes
+  });
+
+  es.addEventListener('result', e => {
+    loadStatus();                       // pull fresh full status on new result
+  });
+
+  es.onerror = () => {
+    // Reconnect after 5s
+    es.close();
+    setTimeout(connectSSE, 5000);
+  };
+}
+
+// ── Error toast ───────────────────────────────────────────────────
+function showError(msg) {
+  const t = document.getElementById('error-toast');
+  t.textContent = '⚠ ' + msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 5000);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────
+loadStatus();
+connectSSE();
+// Fallback polling every 60s (in case SSE fails)
+setInterval(loadStatus, 60000);
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+flight_checker.log
+price_history.json
+status.json
+*.egg-info/
+.DS_Store
