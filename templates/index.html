@@ -514,32 +514,21 @@ function setChecking(on) {
 }
 
 // ── Manual check ──────────────────────────────────────────────────
-let _checkPoller = null;
-
 async function triggerCheck() {
+  if (document.getElementById('checkBtn').disabled) return;
+  setChecking(true);
   try {
+    // The server now runs the check synchronously and returns the result
+    // directly (~20-30 s). No background threads, no SSE dependency.
     const r = await fetch('/api/check', { method: 'POST' });
-    if (r.status === 429) { showError('Already checking, please wait.'); return; }
-    if (!r.ok) { showError('Check request failed (' + r.status + ').'); return; }
-    setChecking(true);
-
-    // Poll /api/status every 3 s until checking is done.
-    // This is a reliable fallback for environments where SSE is buffered/dropped.
-    if (_checkPoller) clearInterval(_checkPoller);
-    _checkPoller = setInterval(async () => {
-      try {
-        const sr = await fetch('/api/status');
-        if (!sr.ok) return;
-        const sd = await sr.json();
-        if (!sd.checking) {
-          clearInterval(_checkPoller);
-          _checkPoller = null;
-          applyStatus(sd);
-          setChecking(false);
-        }
-      } catch (_) { /* ignore transient errors */ }
-    }, 3000);
-  } catch (e) { showError('Could not reach server.'); }
+    if (!r.ok) { showError('Check failed (' + r.status + ').'); return; }
+    // Refresh the full status (includes updated history for the chart)
+    await loadStatus();
+  } catch (e) {
+    showError('Could not reach server.');
+  } finally {
+    setChecking(false);
+  }
 }
 
 // ── Initial load ──────────────────────────────────────────────────
