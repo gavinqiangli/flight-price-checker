@@ -34,6 +34,7 @@ PRICE_LIMIT = 8000           # SEK – alert threshold
 CHECK_EVERY_HOURS = 6        # How often to check (hours)
 
 HISTORY_FILE = Path(__file__).parent / "price_history.json"
+STATUS_FILE  = Path(__file__).parent / "status.json"
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -177,15 +178,29 @@ def save_history(entry: dict) -> None:
         json.dump(history, f, indent=2, ensure_ascii=False)
 
 
+# ── Status (latest check result) ──────────────────────────────────────────────
+
+def load_status() -> dict:
+    if STATUS_FILE.exists():
+        with open(STATUS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_status(data: dict) -> None:
+    with open(STATUS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
 # ── Main check ────────────────────────────────────────────────────────────────
 
-def run_check() -> None:
+def run_check() -> dict | None:
     client_id     = os.getenv("AMADEUS_CLIENT_ID")
     client_secret = os.getenv("AMADEUS_CLIENT_SECRET")
 
     if not client_id or not client_secret:
         log.error("AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET must be set in .env")
-        return
+        return None
 
     log.info("─" * 60)
     log.info("Checking DIRECT flights %s → %s → %s", ORIGIN, DESTINATION, ORIGIN)
@@ -195,22 +210,34 @@ def run_check() -> None:
         offers = search_flights(client_id, client_secret)
     except requests.HTTPError as exc:
         log.error("API error: %s – %s", exc.response.status_code, exc.response.text[:300])
-        return
+        return None
     except Exception as exc:
         log.error("Unexpected error: %s", exc)
-        return
+        return None
 
     if not offers:
         log.warning("No flight offers returned.")
-        return
+        return None
 
     cheapest = offers[0]
     price    = cheapest["price"]
     airlines = ", ".join(cheapest["airlines"])
     now_str  = datetime.now().strftime("%Y-%m-%d %H:%M")
+    is_deal  = price < PRICE_LIMIT
 
-    # Save to history
+    # Build result dict
+    result = {
+        "timestamp":  now_str,
+        "price_sek":  price,
+        "airlines":   airlines,
+        "is_deal":    is_deal,
+        "all_offers": offers[:5],
+        "error":      None,
+    }
+
+    # Save to history and status
     save_history({"timestamp": now_str, "price_sek": price, "airlines": airlines})
+    save_status(result)
 
     # Print results
     print()
@@ -231,7 +258,7 @@ def run_check() -> None:
     log.info("Cheapest offer: %.0f SEK (airlines: %s)", price, airlines)
 
     # Threshold alert
-    if price < PRICE_LIMIT:
+    if is_deal:
         msg = (
             f"DIRECT Flight {ORIGIN}↔{DESTINATION} is NOW {price:.0f} SEK!\n"
             f"Threshold: {PRICE_LIMIT} SEK\n"
@@ -248,6 +275,8 @@ def run_check() -> None:
         email_notify(title, msg)
     else:
         log.info("Price %.0f SEK is above threshold %d SEK. No alert.", price, PRICE_LIMIT)
+
+    return result
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
