@@ -1,7 +1,7 @@
 """
 Flask Web Dashboard for Flight Price Checker
-Run with: venv/bin/python app.py
-Then open: http://localhost:5050
+Local:   venv/bin/python app.py  →  http://localhost:5050
+Vercel:  deployed automatically, cron hits /api/check every 6h
 """
 
 import os
@@ -14,14 +14,20 @@ import schedule
 from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, Response
-
-# ── Bootstrap: load .env before importing flight_checker ─────────────────────
 from dotenv import load_dotenv
+
+# ── Data directory: /tmp on serverless, local dir otherwise ──────────────────
+IS_VERCEL = os.environ.get("VERCEL") == "1"
+DATA_DIR  = Path("/tmp") if IS_VERCEL else Path(__file__).parent
 load_dotenv(Path(__file__).parent / ".env")
 
 # ── Import core checker as a module ──────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 import flight_checker as fc
+
+# Override data file paths for serverless environment
+fc.HISTORY_FILE = DATA_DIR / "price_history.json"
+fc.STATUS_FILE  = DATA_DIR / "status.json"
 
 # ── Flask app ─────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -29,20 +35,18 @@ log = logging.getLogger(__name__)
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 _state = {
-    "checking":        False,
-    "next_check_at":   None,   # datetime
-    "check_count":     0,
-    "sse_listeners":   [],     # list of queue.Queue
+    "checking":      False,
+    "next_check_at": None,
+    "check_count":   0,
+    "sse_listeners": [],
 }
 _state_lock = threading.Lock()
 
+import queue
 
 # ── SSE helpers ───────────────────────────────────────────────────────────────
 
-import queue
-
 def _broadcast(event: str, data: dict) -> None:
-    """Push a Server-Sent Event to all connected browsers."""
     payload = f"event: {event}\ndata: {json.dumps(data)}\n\n"
     with _state_lock:
         dead = []
@@ -83,19 +87,20 @@ def _do_check() -> None:
 
 
 def _scheduler_loop() -> None:
-    """Background thread: run checks on schedule."""
-    # First check immediately
     _do_check()
-    # Schedule subsequent checks
     next_time = datetime.now() + timedelta(hours=fc.CHECK_EVERY_HOURS)
     with _state_lock:
         _state["next_check_at"] = next_time.strftime("%Y-%m-%d %H:%M")
-
     schedule.every(fc.CHECK_EVERY_HOURS).hours.do(_do_check)
     while True:
         schedule.run_pending()
         time.sleep(30)
 
+
+# ── Startup: only run background scheduler when NOT on Vercel ────────────────
+if not IS_VERCEL:
+    t = threading.Thread(target=_scheduler_loop, daemon=True)
+    t.start()
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -138,14 +143,23 @@ def api_status():
     })
 
 
-@app.route("/api/check", methods=["POST"])
+@app.route("/api/check", methods=["POST", "GET"])
 def api_check():
+    """Trigger a price check. Accepts GET so Vercel cron can call it."""
     with _state_lock:
         if _state["checking"]:
             return jsonify({"error": "Already checking, please wait."}), 429
-    t = threading.Thread(target=_do_check, daemon=True)
-    t.start()
-    return jsonify({"status": "started"})
+
+    if IS_VERCEL:
+        # On serverless: run synchronously (no background threads)
+        _do_check()
+        status = fc.load_status()
+        return jsonify({"status": "done", "result": status})
+    else:
+        # Local: run in background thread
+        t = threading.Thread(target=_do_check, daemon=True)
+        t.start()
+        return jsonify({"status": "started"})
 
 
 @app.route("/api/history")
@@ -155,13 +169,12 @@ def api_history():
 
 @app.route("/stream")
 def stream():
-    """Server-Sent Events endpoint for live push updates."""
+    """SSE endpoint — only useful in local mode."""
     q: queue.Queue = queue.Queue(maxsize=20)
     with _state_lock:
         _state["sse_listeners"].append(q)
 
     def generate():
-        # Send initial heartbeat
         yield ": connected\n\n"
         try:
             while True:
@@ -169,7 +182,7 @@ def stream():
                     msg = q.get(timeout=30)
                     yield msg
                 except queue.Empty:
-                    yield ": heartbeat\n\n"   # keep connection alive
+                    yield ": heartbeat\n\n"
         except GeneratorExit:
             with _state_lock:
                 try:
@@ -188,19 +201,9 @@ def stream():
     )
 
 
-# ── Startup (works for both `python app.py` and gunicorn) ────────────────────
-
-def _start_scheduler():
-    t = threading.Thread(target=_scheduler_loop, daemon=True)
-    t.start()
-
-# Start scheduler once when module is loaded (gunicorn imports this module)
-_start_scheduler()
-
 # ── Entry point (local dev only) ──────────────────────────────────────────────
 
 if __name__ == "__main__":
-    host = "0.0.0.0"
     port = int(os.environ.get("PORT", 5050))
     print(f"\n  ✈  Flight Price Monitor  –  http://localhost:{port}\n")
-    app.run(host=host, port=port, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
