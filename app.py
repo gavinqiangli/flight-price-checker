@@ -87,7 +87,10 @@ def _do_check() -> None:
 
 
 def _scheduler_loop() -> None:
-    _do_check()
+    # Schedule periodic checks but do NOT run one immediately on startup.
+    # Running immediately on startup causes a race: Render kills the process
+    # mid-check (SIGTERM), the finally block never fires, and `checking` stays
+    # stuck at True until the next cold-start — blocking every manual trigger.
     next_time = datetime.now() + timedelta(hours=fc.CHECK_EVERY_HOURS)
     with _state_lock:
         _state["next_check_at"] = next_time.strftime("%Y-%m-%d %H:%M")
@@ -145,21 +148,16 @@ def api_status():
 
 @app.route("/api/check", methods=["POST", "GET"])
 def api_check():
-    """Trigger a price check. Accepts GET so Vercel cron can call it."""
+    """Trigger a price check. Always runs synchronously and returns the result.
+    Running in-request (not a background thread) means the result is returned
+    directly and there is no in-memory state that can get stuck between restarts."""
     with _state_lock:
         if _state["checking"]:
-            return jsonify({"error": "Already checking, please wait."}), 429
+            # A scheduled check is already running — return latest saved status.
+            return jsonify({"status": "already_running", "result": fc.load_status()})
 
-    if IS_VERCEL:
-        # On serverless: run synchronously (no background threads)
-        _do_check()
-        status = fc.load_status()
-        return jsonify({"status": "done", "result": status})
-    else:
-        # Local: run in background thread
-        t = threading.Thread(target=_do_check, daemon=True)
-        t.start()
-        return jsonify({"status": "started"})
+    _do_check()   # blocks ~20-30 s; fine within gunicorn's 120 s timeout
+    return jsonify({"status": "done", "result": fc.load_status()})
 
 
 @app.route("/api/history")
