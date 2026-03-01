@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl --list:*)",
+      "Bash(wsl:*)",
+      "Bash(cmd.exe /c start https://railway.app/account/tokens)",
+      "Bash(BGPID=$!)",
+      "Bash(cmd.exe /c start https://77307c9a55a3aa.lhr.life)",
+      "Bash(python3:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(node -e:*)",
+      "Bash(/c/Users/eqiglii/AppData/Local/Microsoft/WindowsApps/python3:*)",
+      "Bash(/c/Python312/python.exe -c \":*)",
+      "Bash(powershell.exe -Command \"Rename-Item -Path ''C:\\\\Users\\\\eqiglii\\\\flight ticket'' -NewName ''flight-ticket''\")"
+    ]
+  }
+}
