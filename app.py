@@ -1,7 +1,7 @@
 """
 Flask Web Dashboard for Flight Price Checker
-Local:   venv/bin/python app.py  →  http://localhost:5050
-Vercel:  deployed automatically, cron hits /api/check every 6h
+Render: gunicorn app:app (see render.yaml)
+Local:  python app.py  →  http://localhost:5050
 """
 
 import os
@@ -11,23 +11,15 @@ import time
 import logging
 import threading
 import schedule
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, Response
 from dotenv import load_dotenv
 
-# ── Data directory: /tmp on serverless, local dir otherwise ──────────────────
-IS_VERCEL = os.environ.get("VERCEL") == "1"
-DATA_DIR  = Path("/tmp") if IS_VERCEL else Path(__file__).parent
 load_dotenv(Path(__file__).parent / ".env")
 
-# ── Import core checker as a module ──────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 import flight_checker as fc
-
-# Override data file paths for serverless environment
-fc.HISTORY_FILE = DATA_DIR / "price_history.json"
-fc.STATUS_FILE  = DATA_DIR / "status.json"
 
 # ── Flask app ─────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -91,7 +83,7 @@ def _scheduler_loop() -> None:
     # Running immediately on startup causes a race: Render kills the process
     # mid-check (SIGTERM), the finally block never fires, and `checking` stays
     # stuck at True until the next cold-start — blocking every manual trigger.
-    next_time = datetime.now() + timedelta(hours=fc.CHECK_EVERY_HOURS)
+    next_time = datetime.now(timezone.utc) + timedelta(hours=fc.CHECK_EVERY_HOURS)
     with _state_lock:
         _state["next_check_at"] = next_time.strftime("%Y-%m-%d %H:%M")
     schedule.every(fc.CHECK_EVERY_HOURS).hours.do(_do_check)
@@ -100,10 +92,8 @@ def _scheduler_loop() -> None:
         time.sleep(30)
 
 
-# ── Startup: only run background scheduler when NOT on Vercel ────────────────
-if not IS_VERCEL:
-    t = threading.Thread(target=_scheduler_loop, daemon=True)
-    t.start()
+t = threading.Thread(target=_scheduler_loop, daemon=True)
+t.start()
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -204,4 +194,4 @@ def stream():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
     print(f"\n  ✈  Flight Price Monitor  –  http://localhost:{port}\n")
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=port, debug=os.environ.get("FLASK_DEBUG", "0") == "1", threaded=True)

@@ -13,7 +13,7 @@ import logging
 import smtplib
 import schedule
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
@@ -122,21 +122,6 @@ def search_flights(client_id: str, client_secret: str) -> list[dict]:
     return sorted(offers, key=lambda x: x["price"])
 
 
-# ── Desktop notification ──────────────────────────────────────────────────────
-
-def desktop_notify(title: str, message: str) -> None:
-    try:
-        from plyer import notification
-        notification.notify(
-            title=title,
-            message=message,
-            app_name="Flight Price Checker",
-            timeout=30,
-        )
-    except Exception as exc:
-        log.warning("Desktop notification failed: %s", exc)
-
-
 # ── Email notification ────────────────────────────────────────────────────────
 
 def email_notify(subject: str, body: str) -> None:
@@ -222,7 +207,7 @@ def run_check() -> dict | None:
     cheapest = offers[0]
     price    = cheapest["price"]
     airlines = ", ".join(cheapest["airlines"])
-    now_str  = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     is_deal  = price < PRICE_LIMIT
 
     # Build result dict
@@ -271,7 +256,6 @@ def run_check() -> dict | None:
         print(f"{Fore.GREEN}{'='*60}")
         print(f"  🚨  PRICE ALERT!  {price:.0f} SEK  (limit: {PRICE_LIMIT} SEK)")
         print(f"{'='*60}{Style.RESET_ALL}")
-        desktop_notify(title, msg)
         email_notify(title, msg)
     else:
         log.info("Price %.0f SEK is above threshold %d SEK. No alert.", price, PRICE_LIMIT)
